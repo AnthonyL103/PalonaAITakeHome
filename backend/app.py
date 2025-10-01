@@ -271,6 +271,7 @@ class PromptResponse(BaseModel):
 def parse_agent_response(raw_response: str) -> dict:
     text_result = None
     image_urls = []
+    print(raw_response)
     
     text_match = re.search(r'%%RESPONSE\s*(.*?)\s*%%', raw_response, re.DOTALL)
     if text_match:
@@ -279,7 +280,7 @@ def parse_agent_response(raw_response: str) -> dict:
     image_match = re.search(r'%%RESPONSE_IMAGE\s*(.*?)\s*%%', raw_response, re.DOTALL)
     if image_match:
         image_section = image_match.group(1)
-        url_matches = re.findall(r'IMAGE_URL:\s*(.*?)\s*', image_section)
+        url_matches = re.findall(r'##IMAGE_URL:\s*(.*?)\s*##', image_section)
         image_urls = [url.strip() for url in url_matches]
     
     return {

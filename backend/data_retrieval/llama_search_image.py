@@ -56,9 +56,17 @@ class ImageProductSearch:
             except Exception as e:
                 raise ValueError(f"Could not process image input: {e}")
     
-    def search(self, image_input: str, limit: int = 5) -> List[Dict[str, Any]]:
+    def search(
+        self, 
+        image_input: str, 
+        limit: int = 5,
+        category: str = None,
+        max_price: float = None,
+        min_rating: float = None
+    ) -> List[Dict[str, Any]]:
         from sentence_transformers import SentenceTransformer
         from llama_index.core.schema import QueryBundle
+        from llama_index.core.vector_stores import MetadataFilters, MetadataFilter
         
         img = Image.open(image_input).convert('RGB')
         
@@ -66,11 +74,23 @@ class ImageProductSearch:
         query_embedding = clip_model.encode(img)
         
         query_bundle = QueryBundle(
-            query_str="",   
+            query_str="",
             embedding=query_embedding.tolist()
         )
         
-        retriever = self.index.as_retriever(similarity_top_k=limit)
+        filters = []
+        if category:
+            filters.append(MetadataFilter(key="category", value=category))
+        if max_price:
+            filters.append(MetadataFilter(key="price", value=max_price, operator="<="))
+        if min_rating:
+            filters.append(MetadataFilter(key="rating", value=min_rating, operator=">="))
+        
+        retriever_kwargs = {"similarity_top_k": limit}
+        if filters:
+            retriever_kwargs["filters"] = MetadataFilters(filters=filters)
+        
+        retriever = self.index.as_retriever(**retriever_kwargs)
         nodes = retriever.retrieve(query_bundle)
         
         results = []
@@ -81,7 +101,9 @@ class ImageProductSearch:
                 "price": node.metadata.get("price"),
                 "category": node.metadata.get("category"),
                 "thumbnail": node.metadata.get("thumbnail"),
-                "similarity_score": node.score
+                "similarity_score": node.score,
+                "rating": node.metadata.get("rating"),
+                "stock": node.metadata.get("stock")
             }
             results.append(result)
         

@@ -1,6 +1,7 @@
 from llama_index.core import load_index_from_storage, StorageContext
+from llama_index.core.vector_stores import MetadataFilters, MetadataFilter
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -33,8 +34,44 @@ class TextProductSearch:
         )
         print("Text index loaded successfully")
     
-    def search(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
-        retriever = self.index.as_retriever(similarity_top_k=limit)
+    def search(
+        self, 
+        query: str, 
+        limit: int = 5,
+        category: Optional[str] = None,
+        min_price: Optional[float] = None,
+        max_price: Optional[float] = None,
+        min_rating: Optional[float] = None,
+        brand: Optional[str] = None,
+        in_stock: bool = False
+    ) -> List[Dict[str, Any]]:
+       
+        filters = []
+        
+        if category:
+            filters.append(MetadataFilter(key="category", value=category, operator="=="))
+        
+        if min_price is not None:
+            filters.append(MetadataFilter(key="price", value=min_price, operator=">="))
+        
+        if max_price is not None:
+            filters.append(MetadataFilter(key="price", value=max_price, operator="<="))
+        
+        if min_rating is not None:
+            filters.append(MetadataFilter(key="rating", value=min_rating, operator=">="))
+        
+        if brand:
+            filters.append(MetadataFilter(key="brand", value=brand, operator="=="))
+        
+        if in_stock:
+            filters.append(MetadataFilter(key="stock", value=0, operator=">"))
+        
+        retriever_kwargs = {"similarity_top_k": limit}
+        
+        if filters:
+            retriever_kwargs["filters"] = MetadataFilters(filters=filters)
+        
+        retriever = self.index.as_retriever(**retriever_kwargs)
         nodes = retriever.retrieve(query)
         
         results = []
@@ -65,6 +102,25 @@ def get_text_search() -> TextProductSearch:
     return _text_search_instance
 
 
-def search_products_by_text(query: str, limit: int = 5) -> List[Dict[str, Any]]:
+def search_products_by_text(
+    query: str, 
+    limit: int = 5,
+    category: Optional[str] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    min_rating: Optional[float] = None,
+    brand: Optional[str] = None,
+    in_stock: bool = False
+) -> List[Dict[str, Any]]:
+    
     searcher = get_text_search()
-    return searcher.search(query, limit)
+    return searcher.search(
+        query=query,
+        limit=limit,
+        category=category,
+        min_price=min_price,
+        max_price=max_price,
+        min_rating=min_rating,
+        brand=brand,
+        in_stock=in_stock
+    )

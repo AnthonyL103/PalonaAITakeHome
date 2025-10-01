@@ -16,7 +16,7 @@ CATALOG_PATH = os.path.join(BASE_DIR, "data", "product_catalog.json")
 def fetch_product_catalog():
     import requests
     
-    response = requests.get('https://dummyjson.com/products?limit=100')
+    response = requests.get('https://dummyjson.com/products?limit=1000')
     data = response.json()
     
     os.makedirs("./data", exist_ok=True)
