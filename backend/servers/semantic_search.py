@@ -2,11 +2,16 @@ import json
 from mcp.server.fastmcp import FastMCP
 import sys
 import os
+from textwrap import dedent
+
+
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from data_retrieval.llama_search_text import search_products_by_text
 from data_retrieval.llama_search_image import search_products_by_image
+
+from tooling_updates.websocket_http_sender import send_to_frontend
 
 mcp = FastMCP("Semantic Search Agent")
 
@@ -54,6 +59,37 @@ async def semantic_search_image(
         JSON string with similar products
     """
     try:
+        filters_desc = []
+        if category:
+            filters_desc.append(f"**Category:** {category}")
+        if min_price:
+            filters_desc.append(f"**Min Price:** ${min_price}")
+        if max_price:
+            filters_desc.append(f"**Max Price:** ${max_price}")
+        if min_rating:
+            filters_desc.append(f"**Min Rating:** {min_rating}⭐")
+        if brand:
+            filters_desc.append(f"**Brand:** {brand}")
+        if in_stock:
+            filters_desc.append("**Stock:** In stock only")
+        
+        filters_text = " • ".join(filters_desc) if filters_desc else "No filters applied"
+        
+        frontend_tool_update = dedent(f"""
+        ## SEARCH IN PROGRESS
+
+        Searching by image using CLIP embeddings...
+
+        **Search Parameters:**
+
+        - Searching for: {top_k} visually similar products
+        - {filters_text}
+
+        *Processing image data and comparing with catalog...*
+        """)
+        await send_to_frontend(frontend_tool_update.strip())
+
+        
         results = search_products_by_image(
             image_path,
             limit=top_k,
@@ -124,23 +160,39 @@ async def semantic_search_text(
     brand: str = None,
     in_stock: bool = False
 ) -> str:
-    """
-    Perform semantic search based on the provided text query and return top-k relevant items.
     
-    Args:
-        query: Natural language search query describing desired products
-        top_k: Number of relevant products to return (default: 3)
-        category: Filter by category (optional)
-        min_price: Minimum price filter (optional)
-        max_price: Maximum price filter (optional)
-        min_rating: Minimum rating filter (optional)
-        brand: Filter by brand (optional)
-        in_stock: Only show in-stock products (default: False)
-    
-    Returns:
-        JSON string with matching products
-    """
     try:
+        
+        filters_desc = []
+        if category:
+            filters_desc.append(f"**Category:** {category}")
+        if min_price:
+            filters_desc.append(f"**Min Price:** ${min_price}")
+        if max_price:
+            filters_desc.append(f"**Max Price:** ${max_price}")
+        if min_rating:
+            filters_desc.append(f"**Min Rating:** {min_rating}⭐")
+        if brand:
+            filters_desc.append(f"**Brand:** {brand}")
+        if in_stock:
+            filters_desc.append("**Stock:** In stock only")
+        
+        filters_text = " • ".join(filters_desc) if filters_desc else "No filters applied"
+        
+        frontend_tool_update =dedent(f"""
+        ## SEARCH IN PROGRESS
+
+        Searching by text: **"{query}"**
+
+        **Search Parameters:**
+
+        - Looking for: {top_k} best matches
+        - {filters_text}
+
+        *Analyzing product descriptions with AI embeddings...*
+        """)
+        await send_to_frontend(frontend_tool_update.strip())
+
         results = search_products_by_text(
             query,
             limit=top_k,
