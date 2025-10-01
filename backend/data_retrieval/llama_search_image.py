@@ -1,6 +1,6 @@
 from llama_index.core import load_index_from_storage, StorageContext
 from llama_index.embeddings.clip import ClipEmbedding
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import os
 import base64
 from io import BytesIO
@@ -60,9 +60,12 @@ class ImageProductSearch:
         self, 
         image_input: str, 
         limit: int = 5,
-        category: str = None,
-        max_price: float = None,
-        min_rating: float = None
+        category: Optional[str] = None,
+        min_price: Optional[float] = None,
+        max_price: Optional[float] = None,
+        min_rating: Optional[float] = None,
+        brand: Optional[str] = None,
+        in_stock: bool = False
     ) -> List[Dict[str, Any]]:
         from sentence_transformers import SentenceTransformer
         from llama_index.core.schema import QueryBundle
@@ -79,14 +82,27 @@ class ImageProductSearch:
         )
         
         filters = []
+        
         if category:
-            filters.append(MetadataFilter(key="category", value=category))
-        if max_price:
+            filters.append(MetadataFilter(key="category", value=category, operator="=="))
+        
+        if min_price is not None:
+            filters.append(MetadataFilter(key="price", value=min_price, operator=">="))
+        
+        if max_price is not None:
             filters.append(MetadataFilter(key="price", value=max_price, operator="<="))
-        if min_rating:
+        
+        if min_rating is not None:
             filters.append(MetadataFilter(key="rating", value=min_rating, operator=">="))
         
+        if brand:
+            filters.append(MetadataFilter(key="brand", value=brand, operator="=="))
+        
+        if in_stock:
+            filters.append(MetadataFilter(key="stock", value=0, operator=">"))
+        
         retriever_kwargs = {"similarity_top_k": limit}
+        
         if filters:
             retriever_kwargs["filters"] = MetadataFilters(filters=filters)
         
@@ -103,7 +119,8 @@ class ImageProductSearch:
                 "thumbnail": node.metadata.get("thumbnail"),
                 "similarity_score": node.score,
                 "rating": node.metadata.get("rating"),
-                "stock": node.metadata.get("stock")
+                "stock": node.metadata.get("stock"),
+                "brand": node.metadata.get("brand")
             }
             results.append(result)
         
@@ -119,7 +136,25 @@ def get_image_search() -> ImageProductSearch:
     return _image_search_instance
 
 
-def search_products_by_image(image_input: str, limit: int = 5) -> List[Dict[str, Any]]:
-    
+def search_products_by_image(
+    image_input: str,
+    limit: int = 5,
+    category: Optional[str] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    min_rating: Optional[float] = None,
+    brand: Optional[str] = None,
+    in_stock: bool = False
+) -> List[Dict[str, Any]]:
+   
     searcher = get_image_search()
-    return searcher.search(image_input, limit)
+    return searcher.search(
+        image_input,
+        limit=limit,
+        category=category,
+        min_price=min_price,
+        max_price=max_price,
+        min_rating=min_rating,
+        brand=brand,
+        in_stock=in_stock
+    )

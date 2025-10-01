@@ -37,50 +37,89 @@ RETRYABLE_ERROR_KEYWORDS = [
     'too many connections', 'server overloaded', 'temporary failure', 
     'try again', 'timeout', 'timed out', 'connection timeout',
     'read timeout', 'write timeout', 'operation timeout',
-    
     'memory temporarily unavailable', 'disk space temporarily full',
     'resource temporarily unavailable', 'service temporarily unavailable',
     'temporarily unable', 'busy', 'locked', 'deadlock',
-    
     'rate limit', 'throttled', 'quota exceeded', 'too many requests',
     'request limit', 'api limit',
-    
     'server busy', 'service unavailable', 'maintenance mode',
     'overloaded', 'congestion', 'backpressure',
-    
     'network unreachable', 'host temporarily unreachable',
-    'dns temporarily failed', 'name resolution temporarily failed'
+    'dns temporarily failed', 'name resolution temporarily failed',
+    
+    'model overloaded', 'context length temporarily exceeded', 'tokens per minute',
+    'concurrent requests exceeded', 'openai rate limit', 'anthropic rate limit',
+    'model temporarily unavailable', 'inference timeout', 'generation timeout',
+    
+    'index temporarily locked', 'embedding service unavailable',
+    'vector search timeout', 'similarity search timeout',
+    'clip model loading', 'model warming up',
+    
+    'image processing queue full', 'thumbnail generation failed temporarily',
+    'image download timeout', 'cdn temporarily unavailable',
+    'image service overloaded', 'processing capacity exceeded',
+    
+    'websocket connection limit', 'broadcast queue full',
+    'message queue overflow', 'connection pool exhausted',
+    
+    'connection pool exhausted', 'too many open connections',
+    'storage temporarily unavailable', 'cache miss timeout',
+    'index rebuild in progress', 'replication lag'
 ]
 
 NON_RETRYABLE_ERROR_KEYWORDS = [
     'connection', 'network', 'socket', 'broken pipe', 
     'connection reset', 'host unreachable', 'connection refused',
     'no route to host', 'network is unreachable',
-    
     'authentication failed', 'unauthorized', 'forbidden', 
     'access denied', 'permission denied', 'invalid credentials',
     'invalid token', 'expired token', 'invalid key',
-    
     'column', 'table', 'syntax', 'type mismatch', 'invalid', 
     'does not exist', 'unknown', 'not found', 'missing',
     'duplicate key', 'constraint violation', 'foreign key',
-    
     'validation error', 'invalid format', 'malformed',
     'bad request', 'invalid parameter', 'invalid input',
     'parse error', 'decode error', 'encoding error',
-    
     'configuration error', 'config', 'misconfigured',
     'invalid configuration', 'missing configuration',
-    
     'file not found', 'directory not found', 'path not found',
     'permission denied', 'disk full', 'no space left',
-    
     'null pointer', 'index out of bounds', 'key error',
     'attribute error', 'type error', 'value error',
     'assertion error', 'not implemented',
-    
     'version mismatch', 'incompatible', 'unsupported',
-    'deprecated', 'not supported'
+    'deprecated', 'not supported',
+    
+    'invalid api key', 'api key revoked', 'subscription expired',
+    'insufficient credits', 'account suspended', 'invalid model',
+    'model not found', 'context length exceeded permanently',
+    'invalid prompt', 'content policy violation', 'unsafe content',
+    
+    'index corrupted', 'index not found', 'invalid embedding dimension',
+    'embedding model mismatch', 'vector dimension mismatch',
+    'invalid similarity metric', 'index schema error',
+    
+    'invalid image format', 'corrupted image', 'image too large',
+    'unsupported image type', 'invalid image dimensions',
+    'image decode failed', 'invalid base64', 'malformed image data',
+    'image metadata corrupted', 'exif data invalid',
+    
+    'invalid filter operator', 'filter type mismatch',
+    'metadata field not found', 'invalid price range',
+    'category does not exist', 'invalid rating value',
+    'brand not recognized', 'invalid stock filter',
+    
+    'product not found', 'catalog empty', 'invalid product id',
+    'thumbnail missing', 'price data corrupted',
+    'inventory data invalid', 'sku not found',
+    
+    'tool not found', 'invalid tool parameters', 'tool execution failed',
+    'conversation context corrupted', 'history limit exceeded',
+    'invalid response format', 'markdown parse error',
+    
+    'websocket protocol error', 'invalid message format',
+    'connection already closed', 'invalid connection id',
+    'handshake failed', 'protocol version unsupported'
 ]
 
 def is_retryable_error(error: Exception) -> bool:
