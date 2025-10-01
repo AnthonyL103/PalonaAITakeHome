@@ -3,6 +3,15 @@ from llama_index.core.vector_stores import MetadataFilters, MetadataFilter
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from typing import List, Dict, Any, Optional
 import os
+import logging
+import time
+
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from app import is_retryable_error, retry_operation
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEXT_STORAGE_PATH = os.path.join(BASE_DIR, "storage", "text_index")
@@ -21,18 +30,17 @@ class TextProductSearch:
                 "Please run llama_search_config.py first to create indexes."
             )
         
-        self.embed_model = HuggingFaceEmbedding(
-            model_name="BAAI/bge-small-en-v1.5"
-        )
+        def _load():
+            self.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
+            storage_context = StorageContext.from_defaults(persist_dir=TEXT_STORAGE_PATH)
+            self.index = load_index_from_storage(storage_context, embed_model=self.embed_model)
+            logger.info("Text index loaded successfully")
         
-        storage_context = StorageContext.from_defaults(
-            persist_dir=TEXT_STORAGE_PATH
-        )
-        self.index = load_index_from_storage(
-            storage_context,
-            embed_model=self.embed_model
-        )
-        print("Text index loaded successfully")
+        try:
+            retry_operation(_load, max_retries=2)
+        except Exception as e:
+            logger.error(f"Failed to load text index after retries: {e}")
+            raise
     
     def search(
         self, 
@@ -45,52 +53,63 @@ class TextProductSearch:
         brand: Optional[str] = None,
         in_stock: bool = False
     ) -> List[Dict[str, Any]]:
-       
-        filters = []
+        if not query or not query.strip():
+            raise ValueError("Query cannot be empty")
         
-        if category:
-            filters.append(MetadataFilter(key="category", value=category, operator="=="))
+        if len(query) > 500:
+            raise ValueError("Query too long (max 500 characters)")
         
-        if min_price is not None:
-            filters.append(MetadataFilter(key="price", value=min_price, operator=">="))
+        if limit < 1 or limit > 100:
+            raise ValueError("Limit must be between 1 and 100")
         
-        if max_price is not None:
-            filters.append(MetadataFilter(key="price", value=max_price, operator="<="))
+        def _search():
+            filters = []
+            
+            if category:
+                filters.append(MetadataFilter(key="category", value=category, operator="=="))
+            if min_price is not None:
+                filters.append(MetadataFilter(key="price", value=min_price, operator=">="))
+            if max_price is not None:
+                filters.append(MetadataFilter(key="price", value=max_price, operator="<="))
+            if min_rating is not None:
+                filters.append(MetadataFilter(key="rating", value=min_rating, operator=">="))
+            if brand:
+                filters.append(MetadataFilter(key="brand", value=brand, operator="=="))
+            if in_stock:
+                filters.append(MetadataFilter(key="stock", value=0, operator=">"))
+            
+            retriever_kwargs = {"similarity_top_k": limit}
+            if filters:
+                retriever_kwargs["filters"] = MetadataFilters(filters=filters)
+            
+            retriever = self.index.as_retriever(**retriever_kwargs)
+            nodes = retriever.retrieve(query)
+            
+            results = []
+            for node in nodes:
+                result = {
+                    "product_id": node.metadata.get("product_id"),
+                    "title": node.metadata.get("title"),
+                    "price": node.metadata.get("price"),
+                    "category": node.metadata.get("category"),
+                    "rating": node.metadata.get("rating"),
+                    "stock": node.metadata.get("stock"),
+                    "brand": node.metadata.get("brand"),
+                    "thumbnail": node.metadata.get("thumbnail"),
+                    "similarity_score": node.score,
+                    "text_snippet": node.text[:200] + "..." if len(node.text) > 200 else node.text
+                }
+                results.append(result)
+            
+            logger.info(f"Text search found {len(results)} results for query: '{query}'")
+            return results
         
-        if min_rating is not None:
-            filters.append(MetadataFilter(key="rating", value=min_rating, operator=">="))
-        
-        if brand:
-            filters.append(MetadataFilter(key="brand", value=brand, operator="=="))
-        
-        if in_stock:
-            filters.append(MetadataFilter(key="stock", value=0, operator=">"))
-        
-        retriever_kwargs = {"similarity_top_k": limit}
-        
-        if filters:
-            retriever_kwargs["filters"] = MetadataFilters(filters=filters)
-        
-        retriever = self.index.as_retriever(**retriever_kwargs)
-        nodes = retriever.retrieve(query)
-        
-        results = []
-        for node in nodes:
-            result = {
-                "product_id": node.metadata.get("product_id"),
-                "title": node.metadata.get("title"),
-                "price": node.metadata.get("price"),
-                "category": node.metadata.get("category"),
-                "rating": node.metadata.get("rating"),
-                "stock": node.metadata.get("stock"),
-                "brand": node.metadata.get("brand"),
-                "thumbnail": node.metadata.get("thumbnail"),
-                "similarity_score": node.score,
-                "text_snippet": node.text[:200] + "..." if len(node.text) > 200 else node.text
-            }
-            results.append(result)
-        
-        return results
+        try:
+            return retry_operation(_search, max_retries=2)
+        except Exception as e:
+            error_type = "retryable" if is_retryable_error(e) else "non-retryable"
+            logger.error(f"Text search failed ({error_type}): {e}", exc_info=True)
+            raise
 
 
 _text_search_instance = None
@@ -112,10 +131,9 @@ def search_products_by_text(
     brand: Optional[str] = None,
     in_stock: bool = False
 ) -> List[Dict[str, Any]]:
-    
     searcher = get_text_search()
     return searcher.search(
-        query=query,
+        query,
         limit=limit,
         category=category,
         min_price=min_price,

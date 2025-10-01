@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Camera, Send, RotateCcw, ShoppingBag, Sparkles, Tag, TrendingUp } from 'lucide-react';
+import { Camera, Send, RotateCcw, ShoppingBag, Sparkles} from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useWebSocket } from './WebSocket';
 
@@ -22,6 +22,8 @@ export default function CommerceAgent() {
   const [isResetting, setIsResetting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -31,14 +33,23 @@ export default function CommerceAgent() {
     scrollToBottom();
   }, [conversation]);
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+
+const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setSelectedImage64(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+    
+    setIsUploadingImage(true);
+    
+    try {
+      console.log("Uploading image:", file);
+      const preview = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      
+      setSelectedImage64(preview);
       
       const formData = new FormData();
       formData.append('image', file);
@@ -48,10 +59,24 @@ export default function CommerceAgent() {
         body: formData,
       });
       
+      if (!response.ok) throw new Error('Upload failed');
+      
       const data = await response.json();
       setSelectedImage(data.image_path);
+      
+      console.log("Image uploaded, server path:", data.image_path);
+      
+    } catch (error) {
+      console.error('Image upload error:', error);
+      setSelectedImage64(null);
+      setSelectedImage(null);
+    } finally {
+      setIsUploadingImage(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
-  };
+};
   
   const handleWebSocketMessage = useCallback((message: any) => {
     console.log('Received WebSocket message:', message);
@@ -181,7 +206,6 @@ export default function CommerceAgent() {
     }}>
       <div className="max-w-5xl mx-auto p-4 h-screen flex flex-col">
         
-        {/* Retro Header */}
         <div className="bg-gradient-to-r from-orange-600 to-red-600 text-white rounded-t-lg shadow-lg border-4 border-orange-800">
           <div className="p-6 flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -190,7 +214,7 @@ export default function CommerceAgent() {
               </div>
               <div>
                 <h1 className="text-3xl font-black tracking-tight" style={{ fontFamily: 'Impact, sans-serif' }}>
-                  RUFUS SHOPPING ASSISTANT
+                  CARTPAL SHOPPING ASSISTANT
                 </h1>
                 <p className="text-orange-100 font-semibold">Your AI-Powered Product Expert • EST. 2025</p>
               </div>
@@ -205,43 +229,25 @@ export default function CommerceAgent() {
             </button>
           </div>
           
-          {/* Retro ticker tape effect */}
-          <div className="bg-orange-800 py-2 px-4 border-t-2 border-orange-950 overflow-hidden">
-            <div className="flex gap-8 text-sm font-bold animate-pulse">
-              <span className="flex items-center gap-2">
-                <Tag className="w-4 h-4" /> DEALS UPDATED DAILY
-              </span>
-              <span className="flex items-center gap-2">
-                <TrendingUp className="w-4 h-4" /> 1000+ PRODUCTS IN STOCK
-              </span>
-              <span className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4" /> AI-POWERED SEARCH
-              </span>
-            </div>
-          </div>
+        
         </div>
 
-        {/* Messages Container */}
         <div className="flex-1 overflow-y-auto bg-white border-l-4 border-r-4 border-orange-800 p-6 space-y-4" style={{
           backgroundImage: 'linear-gradient(0deg, rgba(251, 191, 36, 0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(251, 191, 36, 0.02) 1px, transparent 1px)',
           backgroundSize: '20px 20px',
         }}>
           {conversation.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center space-y-6">
-              <div className="bg-orange-600 rounded-full p-6 border-4 border-orange-800" style={{
-                boxShadow: '6px 6px 0px rgba(0,0,0,0.2)',
-              }}>
+              <div className="bg-orange-600 rounded-full p-6 border-4 border-orange-800" >
                 <Sparkles className="w-16 h-16 text-white" />
               </div>
               
-              <div className="bg-yellow-100 border-4 border-orange-800 rounded-lg p-8 max-w-2xl" style={{
-                boxShadow: '6px 6px 0px rgba(0,0,0,0.2)',
-              }}>
+              <div className="bg-yellow-100 border-4 border-orange-800 rounded-lg p-8 max-w-2xl" >
                 <h2 className="text-3xl font-black text-orange-900 mb-4" style={{ fontFamily: 'Impact, sans-serif' }}>
                   WELCOME TO THE FUTURE OF SHOPPING!
                 </h2>
                 <p className="text-lg text-gray-700 font-semibold mb-6">
-                  I'm Rufus, your intelligent shopping companion. Here's what I can do:
+                  I'm CartPal, your intelligent shopping companion. Here's what I can do:
                 </p>
                 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-left">
@@ -285,9 +291,7 @@ export default function CommerceAgent() {
                       : message.type === 'error'
                       ? 'bg-red-100 text-red-800 border-red-600'
                       : 'bg-yellow-50 text-gray-900 border-orange-800'
-                  }`} style={{
-                    boxShadow: '4px 4px 0px rgba(0,0,0,0.2)',
-                  }}>
+                  }`} >
                     {message.image && (
                       <img 
                         src={message.image} 
@@ -314,6 +318,7 @@ export default function CommerceAgent() {
                           ),
                         }}
                       >
+                       
                         {message.content}
                       </ReactMarkdown>
                     </div>
@@ -321,9 +326,7 @@ export default function CommerceAgent() {
                     {message.imageUrls && message.imageUrls.length > 0 && (
                       <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-3">
                         {message.imageUrls.map((imageUrl, idx) => (
-                          <div key={idx} className="bg-white rounded overflow-hidden border-4 border-orange-800 hover:scale-105 transition-transform" style={{
-                            boxShadow: '3px 3px 0px rgba(0,0,0,0.2)',
-                          }}>
+                          <div key={idx} className="bg-white rounded overflow-hidden border-4 border-orange-800 hover:scale-105 transition-transform" >
                             <img 
                               src={imageUrl} 
                               alt={`Product ${idx + 1}`}
@@ -346,9 +349,7 @@ export default function CommerceAgent() {
               
               {isLoading && (
                 <div className="flex justify-start">
-                  <div className="bg-yellow-50 border-4 border-orange-800 rounded-lg p-4" style={{
-                    boxShadow: '4px 4px 0px rgba(0,0,0,0.2)',
-                  }}>
+                  <div className="bg-yellow-50 border-4 border-orange-800 rounded-lg p-4" >
                     <div className="flex items-center gap-2">
                       <div className="w-3 h-3 bg-orange-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
                       <div className="w-3 h-3 bg-orange-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
@@ -362,24 +363,31 @@ export default function CommerceAgent() {
           )}
         </div>
 
-        {/* Input Area */}
-        <div className="bg-orange-600 border-4 border-orange-800 rounded-b-lg p-4" style={{
-          boxShadow: '8px 8px 0px rgba(0,0,0,0.3)',
-        }}>
+        <div className="bg-orange-600 border-4 border-orange-800 rounded-b-lg p-4" >
           {selectedImage64 && (
             <div className="mb-3 relative inline-block">
-              <img src={selectedImage64} alt="Preview" className="h-20 rounded border-4 border-orange-800" />
-              <button
+                <img 
+                src={selectedImage64} 
+                alt="Preview" 
+                className={`h-20 rounded border-4 border-orange-800 ${isUploadingImage ? 'opacity-50' : ''}`}
+                />
+                {isUploadingImage && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-30 rounded">
+                    <div className="w-3 h-3 bg-white rounded-full animate-bounce"></div>
+                </div>
+                )}
+                <button
                 onClick={() => {
-                  setSelectedImage64(null);
-                  setSelectedImage(null);
+                    setSelectedImage64(null);
+                    setSelectedImage(null);
                 }}
-                className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-7 h-7 flex items-center justify-center hover:bg-red-700 font-bold border-2 border-red-800"
-              >
+                disabled={isUploadingImage}
+                className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-7 h-7 flex items-center justify-center hover:bg-red-700 font-bold border-2 border-red-800 disabled:opacity-50"
+                >
                 ×
-              </button>
+                </button>
             </div>
-          )}
+            )}
           
           <div className="flex gap-2">
             <input
@@ -410,19 +418,16 @@ export default function CommerceAgent() {
             />
             
             <button
-              onClick={() => handleSubmit()}
-              disabled={isLoading || (!prompt.trim() && !selectedImage)}
-              className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded font-black border-2 border-green-800 transition-all hover:translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              style={{ fontFamily: 'Impact, sans-serif' }}
+            onClick={() => handleSubmit()}
+            disabled={isLoading || isUploadingImage || (!prompt.trim() && !selectedImage)}
+            className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded font-black border-2 border-green-800 transition-all hover:translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            style={{ fontFamily: 'Impact, sans-serif' }}
             >
-              <Send className="w-5 h-5" />
-              {isLoading ? 'SENDING...' : isResetting ? 'RESETTING...' : 'SEND'}
+            <Send className="w-5 h-5" />
+            {isUploadingImage ? 'UPLOADING...' : isLoading ? 'SENDING...' : isResetting ? 'RESETTING...' : 'SEND'}
             </button>
           </div>
           
-          <p className="text-xs text-orange-100 mt-2 text-center font-semibold">
-            TIP: Mention your budget, preferred brands, or upload images for better results!
-          </p>
         </div>
       </div>
     </div>

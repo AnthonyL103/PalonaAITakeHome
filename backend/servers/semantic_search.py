@@ -3,17 +3,22 @@ from mcp.server.fastmcp import FastMCP
 import sys
 import os
 from textwrap import dedent
-
-
+import logging
+import asyncio
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from data_retrieval.llama_search_text import search_products_by_text
 from data_retrieval.llama_search_image import search_products_by_image
-
 from tooling_updates.websocket_http_sender import send_to_frontend
 
+from app import is_retryable_error, async_retry_operation
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 mcp = FastMCP("Semantic Search Agent")
+
 
 semantic_search_image_description = """
 Search for products visually similar to an uploaded image with optional filters.
@@ -42,23 +47,29 @@ async def semantic_search_image(
     brand: str = None,
     in_stock: bool = False
 ) -> str:
-    """
-    Perform semantic search on the provided image and return top-k similar items.
     
-    Args:
-        image_path: Path to image file or base64 encoded image string
-        top_k: Number of similar products to return (default: 3)
-        category: Filter by category (optional)
-        min_price: Minimum price filter (optional)
-        max_price: Maximum price filter (optional)
-        min_rating: Minimum rating filter (optional)
-        brand: Filter by brand (optional)
-        in_stock: Only show in-stock products (default: False)
-    
-    Returns:
-        JSON string with similar products
-    """
     try:
+        if not image_path or not image_path.strip():
+            return json.dumps({
+                "status": "error",
+                "message": "Image path is required",
+                "error_type": "validation_error"
+            })
+        
+        if top_k < 1 or top_k > 50:
+            return json.dumps({
+                "status": "error",
+                "message": "top_k must be between 1 and 50",
+                "error_type": "validation_error"
+            })
+        
+        if not os.path.exists(image_path):
+            return json.dumps({
+                "status": "error",
+                "message": f"Image file not found: {image_path}",
+                "error_type": "file_not_found"
+            })
+        
         filters_desc = []
         if category:
             filters_desc.append(f"**Category:** {category}")
@@ -87,19 +98,32 @@ async def semantic_search_image(
 
         *Processing image data and comparing with catalog...*
         """)
-        await send_to_frontend(frontend_tool_update.strip())
-
         
-        results = search_products_by_image(
-            image_path,
-            limit=top_k,
-            category=category,
-            min_price=min_price,
-            max_price=max_price,
-            min_rating=min_rating,
-            brand=brand,
-            in_stock=in_stock
-        )
+        try:
+            await send_to_frontend(frontend_tool_update.strip())
+        except Exception as ws_error:
+            logger.warning(f"WebSocket update failed: {ws_error}")
+        
+        async def _search():
+            logger.info(f"Image search: {image_path}, top_k={top_k}")
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                search_products_by_image,
+                image_path,
+                top_k,
+                category,
+                min_price,
+                max_price,
+                min_rating,
+                brand,
+                in_stock
+            )
+            return results
+        
+        results = await async_retry_operation(_search, max_retries=2)
+        
+        logger.info(f"Image search complete: {len(results)} results")
         
         response = {
             "status": "success",
@@ -118,9 +142,12 @@ async def semantic_search_image(
         return json.dumps(response, indent=2)
     
     except Exception as e:
+        error_type = "retryable_error" if is_retryable_error(e) else "non_retryable_error"
+        logger.error(f"Image search error ({error_type}): {e}", exc_info=True)
         return json.dumps({
             "status": "error",
-            "message": str(e)
+            "message": str(e),
+            "error_type": error_type
         })
 
 
@@ -160,8 +187,28 @@ async def semantic_search_text(
     brand: str = None,
     in_stock: bool = False
 ) -> str:
-    
+ 
     try:
+        if not query or not query.strip():
+            return json.dumps({
+                "status": "error",
+                "message": "Query text is required",
+                "error_type": "validation_error"
+            })
+        
+        if len(query.strip()) > 500:
+            return json.dumps({
+                "status": "error",
+                "message": "Query too long (max 500 characters)",
+                "error_type": "validation_error"
+            })
+        
+        if top_k < 1 or top_k > 50:
+            return json.dumps({
+                "status": "error",
+                "message": "top_k must be between 1 and 50",
+                "error_type": "validation_error"
+            })
         
         filters_desc = []
         if category:
@@ -179,7 +226,7 @@ async def semantic_search_text(
         
         filters_text = " • ".join(filters_desc) if filters_desc else "No filters applied"
         
-        frontend_tool_update =dedent(f"""
+        frontend_tool_update = dedent(f"""
         ## SEARCH IN PROGRESS
 
         Searching by text: **"{query}"**
@@ -191,18 +238,32 @@ async def semantic_search_text(
 
         *Analyzing product descriptions with AI embeddings...*
         """)
-        await send_to_frontend(frontend_tool_update.strip())
-
-        results = search_products_by_text(
-            query,
-            limit=top_k,
-            category=category,
-            min_price=min_price,
-            max_price=max_price,
-            min_rating=min_rating,
-            brand=brand,
-            in_stock=in_stock
-        )
+        
+        try:
+            await send_to_frontend(frontend_tool_update.strip())
+        except Exception as ws_error:
+            logger.warning(f"WebSocket update failed: {ws_error}")
+        
+        async def _search():
+            logger.info(f"Text search: '{query}', top_k={top_k}")
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                search_products_by_text,
+                query,
+                top_k,
+                category,
+                min_price,
+                max_price,
+                min_rating,
+                brand,
+                in_stock
+            )
+            return results
+        
+        results = await async_retry_operation(_search, max_retries=2)
+        
+        logger.info(f"Text search complete: {len(results)} results")
         
         response = {
             "status": "success",
@@ -222,10 +283,13 @@ async def semantic_search_text(
         return json.dumps(response, indent=2)
     
     except Exception as e:
+        error_type = "retryable_error" if is_retryable_error(e) else "non_retryable_error"
+        logger.error(f"Text search error ({error_type}): {e}", exc_info=True)
         return json.dumps({
             "status": "error",
             "message": str(e),
-            "query": query
+            "query": query,
+            "error_type": error_type
         })
 
 

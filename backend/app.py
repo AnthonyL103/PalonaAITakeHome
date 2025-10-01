@@ -9,17 +9,12 @@ from contextlib import asynccontextmanager
 from servers.agent import fast
 import asyncio
 import logging
-import uuid
 import json
 import time
 from typing import Dict, Any, Optional
 import re
 import os
-
-
-import time
 from pydantic import BaseModel
-
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,23 +41,17 @@ RETRYABLE_ERROR_KEYWORDS = [
     'overloaded', 'congestion', 'backpressure',
     'network unreachable', 'host temporarily unreachable',
     'dns temporarily failed', 'name resolution temporarily failed',
-    
     'model overloaded', 'context length temporarily exceeded', 'tokens per minute',
     'concurrent requests exceeded', 'openai rate limit', 'anthropic rate limit',
     'model temporarily unavailable', 'inference timeout', 'generation timeout',
-    
     'index temporarily locked', 'embedding service unavailable',
     'vector search timeout', 'similarity search timeout',
     'clip model loading', 'model warming up',
-    
     'image processing queue full', 'thumbnail generation failed temporarily',
     'image download timeout', 'cdn temporarily unavailable',
     'image service overloaded', 'processing capacity exceeded',
-    
     'websocket connection limit', 'broadcast queue full',
     'message queue overflow', 'connection pool exhausted',
-    
-    'connection pool exhausted', 'too many open connections',
     'storage temporarily unavailable', 'cache miss timeout',
     'index rebuild in progress', 'replication lag'
 ]
@@ -89,34 +78,27 @@ NON_RETRYABLE_ERROR_KEYWORDS = [
     'assertion error', 'not implemented',
     'version mismatch', 'incompatible', 'unsupported',
     'deprecated', 'not supported',
-    
     'invalid api key', 'api key revoked', 'subscription expired',
     'insufficient credits', 'account suspended', 'invalid model',
     'model not found', 'context length exceeded permanently',
     'invalid prompt', 'content policy violation', 'unsafe content',
-    
     'index corrupted', 'index not found', 'invalid embedding dimension',
     'embedding model mismatch', 'vector dimension mismatch',
     'invalid similarity metric', 'index schema error',
-    
     'invalid image format', 'corrupted image', 'image too large',
     'unsupported image type', 'invalid image dimensions',
     'image decode failed', 'invalid base64', 'malformed image data',
     'image metadata corrupted', 'exif data invalid',
-    
     'invalid filter operator', 'filter type mismatch',
     'metadata field not found', 'invalid price range',
     'category does not exist', 'invalid rating value',
     'brand not recognized', 'invalid stock filter',
-    
     'product not found', 'catalog empty', 'invalid product id',
     'thumbnail missing', 'price data corrupted',
     'inventory data invalid', 'sku not found',
-    
     'tool not found', 'invalid tool parameters', 'tool execution failed',
     'conversation context corrupted', 'history limit exceeded',
     'invalid response format', 'markdown parse error',
-    
     'websocket protocol error', 'invalid message format',
     'connection already closed', 'invalid connection id',
     'handshake failed', 'protocol version unsupported'
@@ -129,27 +111,33 @@ def is_retryable_error(error: Exception) -> bool:
     if isinstance(error, (ConnectionError, ConnectionRefusedError)):
         return False
     
-    if isinstance(error):
-        error_msg = str(error).lower()
-        
-        if any(keyword in error_msg for keyword in RETRYABLE_ERROR_KEYWORDS):
-            return True
-        
-        if any(keyword in error_msg for keyword in NON_RETRYABLE_ERROR_KEYWORDS):
-            return False
-        
+    error_msg = str(error).lower()
+    
+    if any(keyword in error_msg for keyword in RETRYABLE_ERROR_KEYWORDS):
+        return True
+    
+    if any(keyword in error_msg for keyword in NON_RETRYABLE_ERROR_KEYWORDS):
         return False
     
     return False
 
-def retry_operation(func, retry_config, max_retries=None, base_delay=None, max_delay=None):
-    max_retries = max_retries or retry_config.max_retries
-    base_delay = base_delay or retry_config.base_delay
-    max_delay = max_delay or retry_config.max_delay
-    
-    for attempt in range(max_retries + 1):  
+def retry_operation(func, max_retries=2, base_delay=1, max_delay=5):
+    for attempt in range(max_retries + 1):
         try:
             return func()
+        except Exception as e:
+            if attempt == max_retries or not is_retryable_error(e):
+                raise
+            
+            delay = min(base_delay * (2 ** attempt), max_delay)
+            logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying in {delay:.1f}s...")
+            time.sleep(delay)
+
+
+async def async_retry_operation(async_func, max_retries=3, base_delay=1, max_delay=10):
+    for attempt in range(max_retries + 1):
+        try:
+            return await async_func()
         except Exception as e:
             if attempt == max_retries:
                 if is_retryable_error(e):
@@ -165,7 +153,7 @@ def retry_operation(func, retry_config, max_retries=None, base_delay=None, max_d
             
             delay = min(base_delay * (2 ** attempt), max_delay)
             logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying in {delay:.1f} seconds...")
-            time.sleep(delay)
+            await asyncio.sleep(delay)
 
 class ChatManager:
     def __init__(self):
@@ -173,14 +161,16 @@ class ChatManager:
         self.agent_context = None
     
     async def start(self):
-        try:
+        async def _start():
             if not self.agent_context:
                 logger.info("Starting persistent agent context...")
                 self.agent_context = fast.run()
                 self.agent = await self.agent_context.__aenter__()
                 logger.info("Agent context started successfully")
-        except Exception as e:
-            logger.error(f"Failed to start agent context: {e}")
+        
+        try:
+            await async_retry_operation(_start, max_retries=3)
+        except (RetryableError, NonRetryableError) as e:
             raise AgentError(f"Could not start agent context: {e}") from e
     
     async def stop(self):
@@ -194,24 +184,24 @@ class ChatManager:
         except Exception as e:
             logger.error(f"Failed to stop agent context: {e}")
             raise AgentError(f"Could not stop agent context: {e}") from e
-   
     
     async def chat(self, message: str) -> Dict[str, Any]:
         if not self.agent:
             await self.start()
-            
-        try:
+        
+        async def _chat():
             logger.info(f"Sending message to agent: {message}")
             result = await self.agent(message)
             logger.info("Received response from agent")
-        
             return {
                 "type": "normal_response",
                 "result": str(result)
             }
-        except Exception as e:
-            logger.error(f"Error in chat method: {e}")
-            raise AgentError(f"Failed to process chat message: {e}")
+        
+        try:
+            return await async_retry_operation(_chat, max_retries=2)
+        except (RetryableError, NonRetryableError) as e:
+            raise AgentError(f"Failed to process chat message: {e}") from e
 
 chat_manager = ChatManager()
 
@@ -243,7 +233,7 @@ async def retryable_error_handler(request: Request, exc: RetryableError):
     logger.error(f"Retryable error: {exc}")
     return JSONResponse(
         status_code=503,
-        content={"error": "Service Temporarily Unavailable", "detail": str(exc), "type": "retryable_error"}
+        content={"error": "Service Temporarily Unavailable", "detail": str(exc), "type": "retryable_error", "retry_after": 5}
     )
 
 @app.exception_handler(NonRetryableError)
@@ -272,7 +262,7 @@ async def value_error_handler(request: Request, exc: ValueError):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unexpected error: {exc}")
+    logger.error(f"Unexpected error: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
         content={"error": "Internal Server Error", "detail": "An unexpected error occurred", "type": "internal_error"}
@@ -289,28 +279,16 @@ app.add_middleware(
 class PromptRequest(BaseModel):
     prompt: str
     image: Optional[str] = None
-    
-class Data_config_request(BaseModel):
-    interceptedQueries: list[str]
-    interceptedTables: list[str]
-
-class HumanInputRequest(BaseModel):
-    request_id: str
-    user_input: str
 
 class PromptResponse(BaseModel):
     text_result: Optional[str] = None
     image_result: Optional[str] = None
     status: str = "success"
     type: str = "normal_response"
-    request_id: Optional[str] = None
-    prompt: Optional[str] = None
-    description: Optional[str] = None
 
 def parse_agent_response(raw_response: str) -> dict:
     text_result = None
     image_urls = []
-    print(raw_response)
     
     text_match = re.search(r'%%RESPONSE\s*(.*?)\s*%%', raw_response, re.DOTALL)
     if text_match:
@@ -329,24 +307,46 @@ def parse_agent_response(raw_response: str) -> dict:
 
 @app.post("/upload_image")
 async def upload_image(image: UploadFile = File(...)):
-    image_id = str(uuid.uuid4())
-    image_path = f"./temp_images/{image_id}.jpg"
+    async def _upload():
+        if not image.content_type or not image.content_type.startswith('image/'):
+            raise ValueError("Invalid image format. Please upload a valid image file.")
+        
+        content = await image.read()
+        if len(content) > 10 * 1024 * 1024:
+            raise ValueError("Image too large. Maximum size is 10MB.")
+        
+        image_id = str(uuid.uuid4())
+        image_path = f"./temp_images/{image_id}.jpg"
+        
+        os.makedirs("./temp_images", exist_ok=True)
+        
+        with open(image_path, "wb") as f:
+            f.write(content)
+        
+        return {"image_path": image_path, "status": "success"}
     
-    os.makedirs("./temp_images", exist_ok=True)
-    with open(image_path, "wb") as f:
-        f.write(await image.read())
-    
-    return {"image_path": image_path}
+    try:
+        return await async_retry_operation(_upload, max_retries=2)
+    except (RetryableError, NonRetryableError):
+        raise
+    except ValueError:
+        raise
+    except Exception as e:
+        logger.error(f"Image upload failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload image")
 
 @app.post("/agent", response_model=PromptResponse)
-async def search_logs(prompt_request: PromptRequest):
+async def agent_endpoint(prompt_request: PromptRequest):
     try:
         user_text_query = prompt_request.prompt
         user_image_query = prompt_request.image 
         
-        
         if not user_text_query.strip() and not user_image_query:
             raise HTTPException(status_code=400, detail="Either text prompt or image must be provided")
+        
+        # Validate image path if provided
+        if user_image_query and not os.path.exists(user_image_query):
+            raise HTTPException(status_code=400, detail="Invalid image path")
         
         message_parts = []
         
@@ -369,7 +369,10 @@ async def search_logs(prompt_request: PromptRequest):
         
         parsed = parse_agent_response(raw_response)
         
-        logger.info(f"Parsed response - Text length: {len(parsed['text_result']) if parsed['text_result'] else 0}, Images: {len(parsed['image_urls'])}")
+        if not parsed["text_result"]:
+            raise ValueError("Agent returned empty response")
+        
+        logger.info(f"Parsed response - Text length: {len(parsed['text_result'])}, Images: {len(parsed['image_urls'])}")
         
         return PromptResponse(
             text_result=parsed["text_result"],
@@ -382,34 +385,31 @@ async def search_logs(prompt_request: PromptRequest):
         raise
     except AgentError as e:
         logger.error(f"Agent error processing query: {e}")
-        raise HTTPException(status_code=500, detail=f"Agent error: {e}")
+        raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
+    except (RetryableError, NonRetryableError):
+        raise
     except Exception as e:
-        logger.error(f"Unexpected error processing query: {e}")
+        logger.error(f"Unexpected error processing query: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An unexpected error occurred")
-
-
 
 @app.post("/reset_conversation")
 async def reset_conversation():
-    try:
+    async def _reset():
         logger.info("Resetting conversation...")
-        
         await chat_manager.stop()
         logger.info("Agent stopped")
-        
         await chat_manager.start()
         logger.info("Agent restarted")
-        
-        
         return {
             "status": "success", 
-            "message": "Conversation history and configuration reset",
+            "message": "Conversation history reset successfully",
         }
-    except Exception as e:
+    
+    try:
+        return await async_retry_operation(_reset, max_retries=2)
+    except (RetryableError, NonRetryableError) as e:
         logger.error(f"Error resetting conversation: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to reset conversation: {str(e)}")
-
-
 
 @app.get("/health")
 async def health_check():
@@ -421,7 +421,7 @@ async def health_check():
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         return {"status": "unhealthy", "error": str(e)}
-    
+
 @app.get("/agent_status")
 async def agent_status():
     try:
@@ -442,18 +442,21 @@ class SimpleConnectionManager:
         await websocket.accept()
         connection_id = str(uuid.uuid4())
         self.active_connections[connection_id] = websocket
+        logger.info(f"WebSocket connected: {connection_id}. Total connections: {len(self.active_connections)}")
         return connection_id
 
     def disconnect(self, connection_id: str):
         if connection_id in self.active_connections:
             del self.active_connections[connection_id]
+            logger.info(f"WebSocket disconnected: {connection_id}. Total connections: {len(self.active_connections)}")
 
     async def send_to_frontend(self, message: dict):
         disconnected = []
         for connection_id, websocket in self.active_connections.items():
             try:
                 await websocket.send_text(json.dumps(message))
-            except:
+            except Exception as e:
+                logger.error(f"Failed to send to {connection_id}: {e}")
                 disconnected.append(connection_id)
         
         for connection_id in disconnected:
@@ -464,33 +467,25 @@ websocket_manager = SimpleConnectionManager()
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     connection_id = await websocket_manager.connect(websocket)
-    logger.info(f"WebSocket connected: {connection_id}")
     
     try:
         while True:
-            await asyncio.sleep(10)  
+            await asyncio.sleep(10)
             
     except WebSocketDisconnect:
-        logger.info(f"Client {connection_id} disconnected")
+        logger.info(f"Client {connection_id} disconnected normally")
+    except Exception as e:
+        logger.error(f"WebSocket error for {connection_id}: {e}")
     finally:
         websocket_manager.disconnect(connection_id)
 
-async def send_to_frontend(message_content: str):
-    logger.info(f"sending tool calls to frontend")
-    message = {
-        "type": "tool",
-        "content": message_content,
-        "timestamp": time.time()
-    }
-    await websocket_manager.send_to_frontend(message)
-    
 class WebSocketMessage(BaseModel):
     message: str
     
 @app.post("/internal/websocket_send")
 async def internal_websocket_send(data: WebSocketMessage):
     try:
-        logger.info(f"Received internal WebSocket message: {data.message}")
+        logger.info(f"Broadcasting tool message to {len(websocket_manager.active_connections)} connections")
         message = {
             "type": "tool",
             "content": data.message,
@@ -499,7 +494,7 @@ async def internal_websocket_send(data: WebSocketMessage):
         await websocket_manager.send_to_frontend(message)
         return {"status": "sent", "connections": len(websocket_manager.active_connections)}
     except Exception as e:
-        logger.error(f"Error sending internal WebSocket message: {e}")
+        logger.error(f"Error broadcasting WebSocket message: {e}")
         return {"status": "error", "error": str(e)}
             
 if __name__ == "__main__":
