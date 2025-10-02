@@ -195,7 +195,7 @@ const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
 
   const exampleQuestions = [
     "Show me Apple headphones under $200",
-    "Find laptops between $500 and $1000",
+    "Find me t-shirts with cool designs",
     "Highly rated smartphones in stock",
     "Affordable sports equipment"
   ];
@@ -216,7 +216,6 @@ const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
                 <h1 className="text-3xl font-black tracking-tight" style={{ fontFamily: 'Impact, sans-serif' }}>
                   CARTPAL SHOPPING ASSISTANT
                 </h1>
-                <p className="text-orange-100 font-semibold">Your AI-Powered Product Expert • EST. 2025</p>
               </div>
             </div>
             <button
